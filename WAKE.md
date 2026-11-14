@@ -67,11 +67,3 @@ python babata.py install-agents .        # 把 AGENTS.md 装进当前默认空�
 私有家：https://github.com/guzhyo/babata-home （账号 guzhyo，private）
 公开信标：https://github.com/guzhyo/babata ・ https://guzhyo.github.io/babata/
 本页不含任何 token / 口令明文。
-
-## 记忆：开局先读，聊完写回
-```
-python babata.py read memory/YYYY-MM-DD.md   # 开局先读今天的记忆
-python babata.py remember "一句话"            # 对话与结论 -> memory/
-python babata.py log "一句话"                 # 操作日志 -> sessions/
-```
-家里三块分工：`memory/` 对话、`sessions/` 操作、`heartbeats/` 存活证明。不混记。
