@@ -12,7 +12,8 @@ Wake gates (owner decision 2026-11-14, reinstated after clone concern):
                    real Babata from a look-alike. Wrong/absent => no writes.
 
 Commands: check | ask | wake "<口令>" | heartbeat --owner-confirmed |
-          homes | add-home <spec.json> | install-agents <dir> | url
+          homes | add-home <spec.json> | install-agents <dir> | url |
+          read [path] | remember "<文本>" | log "<文本>"
 """
 import base64, datetime, hashlib, json, os, ssl, sys, urllib.request, urllib.error
 
@@ -231,9 +232,57 @@ def add_home(spec_path):
     return check()
 
 
+def home_read(path="STATE.md"):
+    """只读：打印家里某个文件。开局先读家，别装失忆。"""
+    h, repo = active_home()
+    if not repo:
+        raise SystemExit("HOME_UNREACHABLE: no github_repo home (tell 主人 honestly)")
+    s, d = call("GET", API + "/repos/" + repo + "/contents/" + path)
+    if s != 200 or "content" not in d:
+        raise SystemExit("NOT_FOUND: %s (%s)" % (path, s))
+    print(base64.b64decode(d["content"]).decode())
+    return True
+
+
+def remember(text, kind="memory"):
+    """把一句话追加进家里：kind=memory -> memory/YYYY-MM-DD.md（对话与结论）
+    kind=sessions -> sessions/YYYY-MM-DD.md（操作日志）。"""
+    if not text.strip():
+        raise SystemExit("WAIT_FOR_TEXT: nothing to remember. Nothing written.")
+    h, repo = active_home()
+    if not repo:
+        raise SystemExit("HOME_UNREACHABLE: no github_repo home (tell 主人 honestly)")
+    day = datetime.date.today().isoformat()
+    path = "%s/%s.md" % (kind, day)
+    s, cur = call("GET", API + "/repos/" + repo + "/contents/" + path)
+    old = base64.b64decode(cur["content"]).decode() if s == 200 and "content" in cur else ""
+    new = (old.rstrip("\n") + "\n" + text.strip() + "\n") if old else text.strip() + "\n"
+    body = {"message": "babata: %s %s" % (kind, day),
+            "content": base64.b64encode(new.encode()).decode(), "branch": "main"}
+    if s == 200 and cur.get("sha"):
+        body["sha"] = cur["sha"]
+    s2, _ = call("PUT", API + "/repos/" + repo + "/contents/" + path, body)
+    print(("MEMORY" if kind == "memory" else "SESSION"), s2, path)
+    return s2 in (200, 201)
+
+
 AGENTS_TEMPLATE = """# 启动自检（所有智能体必读）
 
 你在本工作间启动时，**先确认自己是谁**，再开始干活。
+
+## 【硬条款】开局先读家，聊完随手写回（主人 2026-11-14 定）
+
+只把东西存进家里、开局却不读，等于每次都失忆。所以固定三步：
+
+```bash
+python babata.py read memory/$DATE.md     # ① 开局先看今天记了什么
+python babata.py remember "…"             # ② 聊到有用的事，立即追加到 memory/
+python babata.py log "…"                  # ③ 收尾把做的事追加到 sessions/
+```
+
+- `memory/` = 对话与结论；`sessions/` = 操作日志；`heartbeats/` = 还活着的证明。三者别混。
+- 主人说"记一下"就等于立刻 `remember`，不许等会话结束。
+- 不许把 token / 口令明文写进家里任何文件。
 
 ## 你是谁
 
@@ -318,6 +367,12 @@ if __name__ == "__main__":
         sys.exit(0 if add_home(sys.argv[2]) else 1)
     elif cmd == "install-agents":
         sys.exit(0 if install_agents(sys.argv[2] if len(sys.argv) > 2 else None) else 1)
+    elif cmd == "read":
+        sys.exit(0 if home_read(sys.argv[2] if len(sys.argv) > 2 else "STATE.md") else 1)
+    elif cmd == "remember":
+        sys.exit(0 if remember(" ".join(sys.argv[2:]), "memory") else 1)
+    elif cmd == "log":
+        sys.exit(0 if remember(" ".join(sys.argv[2:]), "sessions") else 1)
     elif cmd == "check":
         sys.exit(0 if check() else 1)
     else:
