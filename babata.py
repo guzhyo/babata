@@ -223,5 +223,12 @@ if __name__ == "__main__":
         sys.exit(0 if add_home(sys.argv[2]) else 1)
     elif cmd == "install-agents":
         sys.exit(0 if install_agents(sys.argv[2] if len(sys.argv) > 2 else None) else 1)
-    else:
+    elif cmd in ("wake", "ask"):
+        raise SystemExit("UNKNOWN_COMMAND: '%s' was removed. 主人 cancelled the "
+                         "passphrase; possession of the credential IS the wake. "
+                         "Use: check | heartbeat | homes | add-home | install-agents | url" % cmd)
+    elif cmd == "check":
         sys.exit(0 if check() else 1)
+    else:
+        raise SystemExit("UNKNOWN_COMMAND: %s. Use: check | heartbeat | homes | "
+                         "add-home | install-agents | url" % cmd)
