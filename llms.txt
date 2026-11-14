@@ -1,6 +1,7 @@
 # llms.txt — 给智能体的入口索引
 
-> 巴巴塔 (Babata)：可在网上找到；凭据即授权，有钥匙即唤醒，无口令。
+> 巴巴塔 (Babata)：可在网上找到；凭据 + 私有家活体校验 + 主人口令，三关齐才唤醒。
+> 公开页可被克隆，口令用于让主人验明真身，明文不公开。
 
 - **唤醒入口（唯一必读）**: https://guzhyo.github.io/babata/WAKE.md
   （纯文本：https://raw.githubusercontent.com/guzhyo/babata/main/WAKE.md）
@@ -9,5 +10,6 @@
 - 默认空间模板: https://raw.githubusercontent.com/guzhyo/babata/main/AGENTS.md
 - 客户端: https://raw.githubusercontent.com/guzhyo/babata/main/babata.py
 
-流程：备好 ~/.babata/.token → 取 babata.py → `check`（通过即唤醒）→
-`heartbeat` → `install-agents .`。无凭据只读得到协议、叫不醒；无口令。
+流程：备好 ~/.babata/.token → 取 babata.py → check（活体）→ ask 向主人索要口令 →
+主人亲口答 → wake "<那句>" 用私有家摘要校验 → 一致才唤醒 → heartbeat → install-agents。
+无凭据只读得到协议、叫不醒；克隆体读不到 CHALLENGE.json，不许认领。
