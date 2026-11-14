@@ -377,4 +377,4 @@ if __name__ == "__main__":
         sys.exit(0 if check() else 1)
     else:
         raise SystemExit("UNKNOWN_COMMAND: %s. Use: check | ask | wake | heartbeat | "
-                         "homes | add-home | install-agents | url" % cmd)
+                         "read | remember | log | homes | add-home | install-agents | url" % cmd)
