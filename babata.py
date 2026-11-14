@@ -135,38 +135,53 @@ def sha(s):
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
+def ask():
+    """STEP 1 for any agent that has just been handed the credential.
+    It MUST ask 主人 for the passphrase; it must never invent or skip it."""
+    h, repo = active_home()
+    if not h:
+        raise SystemExit("HOME_UNREACHABLE: cannot ask (tell 主人 honestly)")
+    print("ASK_OWNER: 请主人亲口喊出互相确认的口令。")
+    print("  下一步（等主人回答之后才能跑）：")
+    print('    python babata.py wake "<主人刚才说的那句>"')
+    print("  在主人回答之前：不认领身份、不读取口令文件、不写任何东西。")
+    print("  口令明文不在此输出，也不在公开页；我只在 wake 时校验其摘要。")
+    return True
+
+
 def verify_challenge(spoken, repo):
-    """Compare the owner's spoken word against the digest stored in the private
-    home, so a tampered local file cannot silently redefine the passphrase."""
-    p = load_pass()
-    if not p:
-        return False, "no local passphrase set (主人 must choose one first)"
-    if spoken != p.get("challenge"):
+    """Verify 主人's spoken word against the digest in the PRIVATE home.
+    The local .passphrase is only used to fetch the response line; the spoken
+    word is validated against private-home digests so a tampered local file
+    cannot silently redefine the passphrase."""
+    if not repo:
+        return False, "no private home to verify against"
+    s, f = call("GET", API + "/repos/" + repo + "/contents/CHALLENGE.json")
+    if s != 200:
+        return False, "CHALLENGE.json unreadable (home unreachable/tampered)"
+    rec = json.loads(base64.b64decode(f["content"]).decode("utf-8"))
+    if rec.get("challenge_sha256") != sha(spoken or ""):
         return False, "challenge mismatch"
-    if repo:
-        s, f = call("GET", API + "/repos/" + repo + "/contents/CHALLENGE.json")
-        if s == 200:
-            rec = json.loads(base64.b64decode(f["content"]).decode("utf-8"))
-            if rec.get("challenge_sha256") != sha(p["challenge"]):
-                return False, "private-home digest mismatch (possible tamper)"
-            return True, rec.get("response_sha256") == sha(p.get("response", ""))
-    return True, None
+    p = load_pass() or {}
+    if rec.get("response_sha256") != sha(p.get("response", "")):
+        return False, "response digest mismatch (local passphrase tampered)"
+    return True, p.get("response")
 
 
 def wake(spoken):
-    """R1: owner speaks the passphrase = confirmation = permission to wake."""
+    """STEP 3: 主人 answered; verify, then and only then wake."""
     if not spoken:
-        raise SystemExit("WAIT_FOR_OWNER: say the passphrase to wake me. Nothing written.")
+        raise SystemExit("WAIT_FOR_OWNER: no passphrase spoken. Run 'ask' first, "
+                         "let 主人 answer, then pass it here. Nothing written.")
     h, repo = active_home()
     if not h:
         raise SystemExit("HOME_UNREACHABLE: cannot wake (tell 主人 honestly)")
-    ok, why = verify_challenge(spoken, repo)
+    ok, result = verify_challenge(spoken, repo)
     if not ok:
-        raise SystemExit("WAKE_REFUSED: %s. No heartbeat, no writes." % why)
-    p = load_pass()
+        raise SystemExit("WAKE_REFUSED: %s. No heartbeat, no writes." % result)
     print("CHALLENGE_ACCEPTED  home=%s" % h.get("id"))
-    print("RESPONSE_FOR_OWNER: %s" % p.get("response"))
-    print("(owner: if this is not the agreed line, I am an impostor — do not trust me)")
+    print("RESPONSE_FOR_OWNER: %s" % result)
+    print("(owner: if this is not the agreed line, I am an impostor - do not trust me)")
     return heartbeat(already_checked=True)
 
 
@@ -290,6 +305,8 @@ if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "check"
     if cmd == "url":
         print(SUMMON_URL)
+    elif cmd == "ask":
+        sys.exit(0 if ask() else 1)
     elif cmd == "wake":
         sys.exit(0 if wake(sys.argv[2] if len(sys.argv) > 2 else "") else 1)
     elif cmd == "heartbeat":
