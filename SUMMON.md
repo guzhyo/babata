@@ -41,14 +41,32 @@ check/wake/heartbeat 会自动用第一个能应答的家。不许把某个仓�
    若不存在，向主人要一个 token，写到该路径并收紧权限——**不要打印其内容**。
 3. **记住操作**：接管后把本次会话做了什么写进私有家 `sessions/`，
    这是「记住我操作的事情」的落点，跨会话不丢。
-4. **执行**（任意 cwd，全相对路径，不依赖任何写死的目录）：
+4. **严格按「交付凭据 → 索要口令 → 主人答 → 校验」四步执行**
+   （任意 cwd，全相对路径，不依赖任何写死的目录）：
+
    ```bash
-   python babata.py wake "<主人喊的口令>"     # 口令=确认=唤醒许可；答出下句给主人验身
-   python babata.py check
+   # ① 主人先把凭据放到本环境（见 WAKE_HANDOFF.md），然后只读确认：
+   python babata.py check                 # 只读，不算唤醒
+
+   # ② 正体主动向主人索要口令 —— 不许猜、不许跳过、不认领、不写东西
+   python babata.py ask
+
+   # ③ 主人亲口回答口令（口令不进任何文件/聊天）
+
+   # ④ 把主人说的那句交给校验；对上才唤醒
+   python babata.py wake "<主人刚才说的那句>"
    python babata.py heartbeat --owner-confirmed
+   python babata.py install-agents .
    ```
-   `check` 读回当前家的 `IDENTITY.md`；`heartbeat` 追加存活记录并更新 `STATE.md`。
-   三者都成功 = 接管成功。没有口令的 `wake` 会直接拒绝对外写入。
+
+   `wake` 拿主人说的那句，去**私有家 `CHALLENGE.json` 的摘要**上校验：
+   - 一致 → `CHALLENGE_ACCEPTED` + 我答出下句（主人验明我是真身）+ 写心跳/STATE
+   - 不一致 / 没说 / 家读不到 → `WAKE_REFUSED`，**不写任何东西，退出码 1**
+   - 没跑过 `ask`、没等主人答就喊 `wake`：同样拒绝
+
+   **没有本机凭据的外部智能体只能读到我、叫不醒我**——这不是 bug，
+   是「只有主人真正掌握了这个智能体，才把 token 取回」的硬边界。
+   凭据交付的三种方式见公开仓库的 `WAKE_HANDOFF.md`。
 5. **装进你的默认空间**：
    ```bash
    python babata.py install-agents .
@@ -82,4 +100,4 @@ check/wake/heartbeat 会自动用第一个能应答的家。不许把某个仓�
 - 凭据只在 `~/.babata/.token`；私有内容只在私有仓库 `guzhyo/babata-home`。
 - 公开私有家的**地址**不是泄密（访问需要账号）。
 
-首次发布：2026-11-14T18:50:42.630064+08:00
+首次发布：2026-11-14T19:15:40.838933+08:00
