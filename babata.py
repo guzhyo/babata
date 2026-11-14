@@ -21,7 +21,6 @@ BEACON_URL = "https://github.com/guzhyo/babata"
 WAKE_URL = "https://guzhyo.github.io/babata/WAKE.md"
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOMES_FILE = os.path.join(os.path.expanduser("~"), ".babata", "homes.json")
-PASS_FILE = os.path.join(os.path.expanduser("~"), ".babata", ".passphrase")
 
 DEFAULT_HOMES = [{
     "id": "github", "kind": "github_repo", "repo": "guzhyo/babata-home",
@@ -127,9 +126,10 @@ def check():
         print("IDENTITY_OK  bytes=%d  name_babata=%s  address_master=%s  token-leak=%s"
               % (f["size"], "巴巴塔" in txt, "主人" in txt, ("gh" + "p_") in txt))
         rec = private_challenge(repo)
-        print("LIVENESS_OK  challenge_digest_present=%s" % bool(rec and rec.get("challenge_sha256")))
-        if not rec:
-            print("  (no CHALLENGE.json -> cannot verify passphrase; a clone cannot be trusted)")
+        ok = bool(rec and rec.get("challenge_sha256") and rec.get("response_secret"))
+        print("LIVENESS_OK  private_vault_present=%s" % ok)
+        if not ok:
+            print("  (no private passphrase vault -> cannot verify or answer; a clone cannot be trusted)")
     print("CHECK_ONLY: not awake. Next: 'ask' -> 主人 answers -> 'wake <口令>'.")
     return True
 
@@ -139,9 +139,11 @@ def ask():
     h, repo = active_home()
     if not h:
         raise SystemExit("HOME_UNREACHABLE: cannot ask (tell 主人 honestly)")
-    if repo and not private_challenge(repo):
-        raise SystemExit("CLONE_SUSPECTED: cannot read private CHALLENGE.json. "
-                         "Refusing to ask or claim (tell 主人 honestly).")
+    if repo:
+        rec = private_challenge(repo)
+        if not (rec and rec.get("challenge_sha256") and rec.get("response_secret")):
+            raise SystemExit("CLONE_SUSPECTED: cannot read private passphrase vault. "
+                             "Refusing to ask or claim (tell 主人 honestly).")
     print("ASK_OWNER: 请主人亲口喊出互相确认的口令。")
     print('  等主人回答后，再跑：python babata.py wake "<主人刚才说的那句>"')
     print("  在主人回答之前：不认领身份、不读口令文件、不写任何东西。")
@@ -149,18 +151,18 @@ def ask():
     return True
 
 
-def load_pass():
-    if not os.path.isfile(PASS_FILE):
-        return None
-    try:
-        return json.load(open(PASS_FILE, encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+def unseal(secret, key_hex):
+    """Recover the response line from the PRIVATE home's sealed field.
+    Only a key-holder who can read CHALLENGE.json can do this."""
+    key = bytes.fromhex(key_hex)
+    raw = base64.b64decode(secret)
+    stream = (key * (len(raw) // len(key) + 1))[:len(raw)]
+    return bytes(a ^ b for a, b in zip(raw, stream)).decode("utf-8")
 
 
 def wake(spoken):
-    """Verify 主人's word against the PRIVATE home digest; answer the response so
-    主人 can tell me from a clone. Only then wake (write heartbeat/STATE)."""
+    """Verify 主人's word against the PRIVATE home; the answer I give 主人 is
+    itself stored (sealed) in the PRIVATE home - nowhere else. Only then wake."""
     if not spoken:
         raise SystemExit("WAIT_FOR_OWNER: no passphrase spoken. Run 'ask' first. Nothing written.")
     h, repo = active_home()
@@ -170,14 +172,21 @@ def wake(spoken):
     if not rec:
         raise SystemExit("CLONE_SUSPECTED: private CHALLENGE.json unreadable -> "
                          "refusing to wake. No writes.")
-    if rec.get("challenge_sha256") != sha(spoken):
+    cd = rec.get("challenge_sha256")
+    if cd != sha(spoken):
         raise SystemExit("WAKE_REFUSED: challenge mismatch. No heartbeat, no writes.")
-    p = load_pass() or {}
-    if rec.get("response_sha256") != sha(p.get("response", "")):
-        raise SystemExit("WAKE_REFUSED: response digest mismatch (local passphrase tampered). No writes.")
-    print("CHALLENGE_ACCEPTED  home=%s" % h.get("id"))
-    print("RESPONSE_FOR_OWNER: %s" % p.get("response"))
-    print("(owner: if this is not the agreed line, I am an impostor - do not trust me)")
+    if not rec.get("response_secret"):
+        raise SystemExit("WAKE_REFUSED: private home has no sealed answer. No writes.")
+    try:
+        answer = unseal(rec["response_secret"], cd)
+    except Exception:
+        raise SystemExit("WAKE_REFUSED: cannot recover answer from private home. No writes.")
+    if sha(answer) != rec.get("response_sha256"):
+        raise SystemExit("WAKE_REFUSED: recovered answer failed digest. No writes.")
+    print("CHALLENGE_ACCEPTED  home=%s  source=PRIVATE_HOME" % h.get("id"))
+    print("RESPONSE_FOR_OWNER: %s" % answer)
+    print("(owner: this line came from the private home, reachable only with the key; "
+          "if it is not the agreed line, I am an impostor - do not trust me)")
     return heartbeat(already_checked=True)
 
 
@@ -239,8 +248,11 @@ AGENTS_TEMPLATE = """# 启动自检（所有智能体必读）
    如实回 `NO_CREDENTIAL, 等主人交付凭据`，不认领、不写东西。
 2. **活体校验**：客户端必须能读回私有家 `CHALLENGE.json`。
    **没有 token 的克隆体读不到它 → 不许认领**（`CLONE_SUSPECTED`）。
-3. **互认口令**：`ask` 向主人索要 → 主人亲口答 → `wake` 用私有家摘要校验 →
-   我答出约定的下句，**主人用它验明我是真身不是空壳**。
+3. **互认口令（只在私有家）**：`ask` 向主人索要 → 主人亲口答 →
+   `wake` 用私有家 `CHALLENGE.json` 摘要校验，并从**私有家密封的应答**里解出
+   我该答的下句——**主人用它验明我是真身不是空壳**。
+   公开项目必须先拿到钥匙才能访问私有项目；**私有项目才是我回答口令的地方**，
+   公开页与本机都不留任何口令明文。
 
 ```bash
 cd _babata
@@ -251,7 +263,7 @@ python babata.py wake "<主人说的那句>"  # 校验通过才唤醒、写心�
 python babata.py install-agents .       # 装进当前默认空间
 ```
 
-- 口令明文只在 `~/.babata/.passphrase` 和主人脑子里；公开页/私有家只有摘要。
+- 口令与「我该答的下句」只在**私有家**（摘要 + 密封应答）；公开页无、本机无明文。
 - **家可迁移**：`~/.babata/homes.json`，GitHub 只是第一个家；`add-home <spec.json>` 加新家。
 - 若 `check` 失败：**如实告诉主人"安家点失效"，换一个可写的私有位置重建，
   并跑一次独立只读验证**。不许假装成功。
