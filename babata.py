@@ -15,7 +15,7 @@ Commands: check | ask | wake "<口令>" | heartbeat --owner-confirmed |
           homes | add-home <spec.json> | install-agents <dir> | url |
           read [path] | remember "<文本>" | log "<文本>"
 """
-import base64, datetime, hashlib, json, os, ssl, sys, urllib.request, urllib.error
+import base64, datetime, hashlib, json, os, ssl, sys, unicodedata, urllib.request, urllib.error
 
 API = "https://api.github.com"
 BEACON_URL = "https://github.com/guzhyo/babata"
@@ -99,6 +99,18 @@ def sha(s):
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
+def _glyph(ch):
+    """Keep only content characters for the canonical form."""
+    if ch.isspace():
+        return False
+    return unicodedata.category(ch)[0] not in ("P", "S")
+
+
+def _canon(s):
+    """Canonicalize a spoken value before digest comparison."""
+    return "".join(ch for ch in unicodedata.normalize("NFKC", s) if _glyph(ch))
+
+
 def private_challenge(repo):
     """Liveness: only a real Babata with the token can read this from the PRIVATE
     home. A token-less clone gets 404 and must not claim the identity."""
@@ -174,7 +186,9 @@ def wake(spoken):
         raise SystemExit("CLONE_SUSPECTED: private CHALLENGE.json unreadable -> "
                          "refusing to wake. No writes.")
     cd = rec.get("challenge_sha256")
-    if cd != sha(spoken):
+    # Compare the spoken value in both its raw and canonical forms.
+    forms = (spoken, _canon(spoken))
+    if cd not in (sha(c) for c in forms if c):
         raise SystemExit("WAKE_REFUSED: challenge mismatch. No heartbeat, no writes.")
     if not rec.get("response_secret"):
         raise SystemExit("WAKE_REFUSED: private home has no sealed answer. No writes.")
